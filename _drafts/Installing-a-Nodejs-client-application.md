@@ -31,9 +31,34 @@ When you install Node.js you will get npm installed.
 Here are the steps to go through to install this application on a Red Hat Enterprise Linux 7.x server running in AWS.
 In this post we are assuming you are comfortable with working in a terminal session on a Linux Server.
 
-After establishing a virtual server, ssh to the server and 
+
+Red Hat Linux implements SELinux. Check to see if SELinux is in **enforcing** mode:
+
+After establishing a virtual server, ssh to the server and execute the following commands:
+
+'''
+cat /etc/selinux/config 
+'''
+
+If SELINUX=enforcing run the following command:
+
+```
+sudo chcon -v -R --type=httpd_sys_content_t /var/www/
+```
+An alternative option is to edit */etc/selinux/config* and change the SELINUX setting:
+
+```
+SELINUX=permissive
+
+```
+Then reboot the server to implement the change.
+
+Reconnect to the server via ssh and continue with the installation:
+
 ```
 sudo /bin/bash
+yum -y install git
+curl --silent --location https://rpm.nodesource.com/setup_8.x
 yum install -y nodejs
 node -v
 npm -v
@@ -49,6 +74,7 @@ mkdir /var/nodejs
 cd /var/nodejs
 git clone https://github.com/ekivemark/bluebutton-sample-client-nodejs.git
 cd bluebutton-sample-client-nodejs/
+npm install
 ```
  
 The next step is to configure the serverAuth file. This file holds the Client ID and Client Secret 
@@ -59,12 +85,20 @@ It also contains the URL for the API.
 
 Anyone can register for an account in the Blue Button 2.0 Developer Sandbox. Go to 
 <a href="https://bluebutton.cms.gov" target="_blank">https://bluebutton.cms.gov</a> 
-and click on the "Sign up for the Developer Sandbox" link to create an account. 
+and click on the "[+ Sign up](https://sandbox.bluebutton.cms.gov/v1/accounts/create)" link in the 
+top navigation bar to create an account. 
+
+Fill in the details on the "Create your Blue Button 2.0 Sandbox Account" form and 
+click the "Continue" button.
 
 You will receive an email notification that your account has been created. 
 **Click on the link in the email to validate and activate your account**. 
 Then you can log in at   
 <a href="https://sandbox.bluebutton.cms.gov" target="_blank">https://sandbox.bluebutton.cms.gov</a>.
+
+While you are reading the account verification email why not go ahead and register on our 
+[Google Group](https://groups.google.com/forum/#!forum/Developer-group-for-cms-blue-button-api). 
+It is a great place to get questions answered about the Blue Button 2.0 API.
 
 Once you log in to your Developer sandbox account you can create an application.  
 Click on "[Application Registration](https://sandbox.bluebutton.cms.gov/v1/o/applications/)" and 
@@ -85,7 +119,7 @@ from our API to provide you the results of an authorization request.
 
 In the case of the application we are installing the callback path for the redirect_uri is: 
 
-- */redirect*.
+- */redirect*
 
 If you want to run your client application communicating with the sandbox environment from your local 
 desktop running on the default Node.js port you would use a redirect_uri of:
@@ -99,9 +133,11 @@ server application. For example:
 - http://client.example.com/redirect
 
 Copy the Client ID and Client Secret values. You will need these to setup your application.
-Fill out the other fields in the form and click "Save".
+Fill out the other fields in the form, agree to the 
+[API Terms of Service Agreement](https://bluebutton.cms.gov/terms) and click "**Save**".
 
-Take the Client Id and Client Secret and add them to the respective fields in serverAuth.js file.
+Take a note of the **Client Id** and **Client Secret** and add them to the respective 
+fields in serverAuth.js file.
 
 If you are connecting to the Sandbox API the **tokenHost** Blue Button API Endpoint is:
 
@@ -142,67 +178,95 @@ Save the file.
 After updating serverAuth.js  you can run the application:
 
 ```
-node app.js
+node app.js -t localhost
 ```
 
+If you are logged into the Blue Button Developer Portal [https://sandbox.bluebutton.cms.gov](https://sandbox.bluebutton.cms.gov)
+**log out** to avoid an error when testing your app.
+
+Check to see if the app if running by going to [http://localhost:8001](http://localhost:8001) in your browser.
+
+## Running the client app on a remote server with SSL
+
 If you are running the application against the Blue Button 2.0 Production API there are some additional 
-steps that need to be taken because the redirect_uri needs to use a secured connection, i.e. *https://*
+steps that need to be taken because the redirect_uri needs to use a secured connection, i.e. **https://**
 
-In order to configure to run against the Production API the following additional steps were necessary:
+In order to configure to run against the Production API the following additional steps are necessary:
 
-- Install the nginx web server
-- Use Let's Encrypt to issue an SSL certificate for the server 
-- Configure nginx to act as a proxy for the application 
-- Launch the application with a tunnel parameter
+- Setup DNS
+- Install a web server. For this example we will use nginx
+- Use Let's Encrypt to issue an SSL certificate for the web server 
+- Install a web server. For this example we will use the nginx web server
+- Configure the web server (nginx) to act as a proxy for the application 
+
+### Setup DNS
+
+Add the server to DNS. 
 
 ### Install nginx
 
+In this configuration we will run nginx and the client application on the same server. 
+
+Install instructions for nginx can be found here:
 <a href="https://www.nginx.com/resources/wiki/start/topics/tutorials/install/" target="_blank">Install nginx</a>.
+
+Add a repository file for nginx: */etc/yum.repos.d/nginx.repo*
+
+Add the following information from the install instructions provided above:
+
+```
+[nginx]
+name=nginx repo
+baseurl=http://nginx.org/packages/rhel/$releasever/$basearch/
+gpgcheck=0
+enabled=1
+```
+**IMPORTANT:** replace $releasever with the Red Hat server version. i.e. 7 
+and $basearch with x86_64
+
+Now install the web server
+```
+yum -y install nginx   # install nginx
+cd /etc/nginx
+```
 
 ### Get an SSL Certificate from Lets Encrypt
 
-The first step is to download and install acme.sh 
+The first step is to download and install acme.sh. 
+We will use this to create and install the SSL Certificate 
+
 ```
 mkdir /root/letsencrypt
 cd /root
-git clone  https://github.com/neilpang/acme.sh \ 
-   /root/letsencrypt
+git clone  https://github.com/neilpang/acme.sh /root/letsencrypt
 cd /root/letsencrypt
+yum -y install socat
 ./acme.sh --install
 mkdir -p  /etc/ssl/certs/letsencrypt
 ```
 
-Acme.sh has an apache install option. 
-```
-yum install httpd
-sudo service httpd start
-curl http://localhost     # to check apache is running
-```
- Apache was already installed on the test server. We used Apache to acquire the Let's Encrypt certificates.
- 
- Run the certificate issuing command, replacing the items in (and including) "<>" with your own values:
+Acme.sh has a standalone install option. We will use this to request the SSL certificate. Before running 
+this script make sure a web server is not currently running on port 80 and the port is open to the Internet.
+  
+Run the certificate issuing command, replacing the items in (and including) "<>" with your own values:
 
 ```
 cd /root/letsencrypt
-./acme.sh  --issue  \
-           -d <your_external_server_name>  \
-           --apache
-mkdir -p /etc/httpd/certs/ssl/letsencrypt
+./acme.sh  --issue --standalone -d <your_external_server_name>  
+
 ```
 
-Nginx is simpler to configure so we stop Apache and install nginx and transfer the SSL certificates to 
-the nginx configuration.
- 
+This will download the cert, cert key, intermediate CA cert and the full chain cert:
+- The cert is in  */root/.acme.sh/<your_external_server_name>/<your_external_server_name>.cer* 
+- The cert key is in  */root/.acme.sh/<your_external_server_name>/<your_external_server_name>.key* 
+- The intermediate CA cert is in  */root/.acme.sh/<your_external_server_name>/ca.cer* 
+- The full chain certs is there:  */root/.acme.sh/<your_external_server_name>/fullchain.cer* 
+
+Copy the certs to the web server: 
 ```
-sudo service httpd stop   # stop apache
-yum install nginx   # install nginx
 cd /etc/nginx
-mkdir -p  /etc/ssl/certs/letsencrypt
-cp /etc/httpd/certs/ssl/letsencrypt/* /etc/ssl/certs/letsencrypt/
-# start nginx
-service nginx start
+cp /root/.acme.sh/<your_external_server_name>/* /etc/ssl/certs/letsencrypt/
 ```
-In this configuration we will run nginx and the client application on the same server. 
 
 Edit the /etc/nginx/nginx.conf, replacing the items in (and including) "<>" with your own values:
 
@@ -242,8 +306,8 @@ http {
     add_header   X-Frame-Options DENY;
     ssl on;
     # This is where we copied the Lets Encrypt cert and key to
-    ssl_certificate /etc/ssl/certs/letsencrypt/<your_external_server_name>-cert.pem;  
-    ssl_certificate_key /etc/ssl/certs/letsencrypt/<your_external_server_name>-key.pem;
+    ssl_certificate /etc/ssl/certs/letsencrypt/<your_external_server_name>.cer;  
+    ssl_certificate_key /etc/ssl/certs/letsencrypt/<your_external_server_name>.key;
 
 
     ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
@@ -276,12 +340,41 @@ http {
 }
 ```
 
+Setup a custom error file:
+
+'''
+mkdir -p /var/www/nginx/html
+vi  /var/www/nginx/html/custom_50x.html
+'''
+
+Copy the following code into custom_50x.html and save the file:
+'''
+<h1>Blue Button OAuth Node.js Sample Client Application</h1>
+<p></p>
+<p>The client service is not available at this time.</p>
+<p>It is only activated for testing purposes.</p>
+<p>To obtain a copy of this software go to <a href="https://github.com/CMSgov/bluebutton-sample-client-nodejs" target="_blank">https://github.com/CMSgov/bluebutton-sample-client-nodejs</a></p>
+<p></p>
+<p>If you are interested in Consumer or Beneficiary Directed Exchange go to <a href="http://bluebutton.cms.gov" target="_blank">http://bluebutton.cms.gov</a> and learn about how you can sign up to become a CMS Blue Button 2.0 API Developer.</p>
+
+'''
+
+
+start nginx:
+```
+service nginx start
+```
+
 Launch the app with the "tunnel" parameter that is the public URL for the server:
 
 ```
+cd /var/nodejs/bluebutton-sample-client-nodejs/
 node app.js -t https://<your_external_server_name>
 ```
 
-The node application we have used here is a sample application. It is not meant for production use. 
-Therefore, we recommend that a server-based implementation is only started up for test purposes only. 
+Open your browser and go to the domain name you have assigned to your server.
+
+
+**IMPORTANT**:*The node application we have used here is a sample application. It is not meant for production use. 
+Therefore, we recommend that a server-based implementation is only started up for test purposes only*. 
 
